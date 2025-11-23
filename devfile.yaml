@@ -1,0 +1,116 @@
+schemaVersion: 2.2.0
+metadata:
+  name: hcl-dx-workspace-pro
+  displayName: "HCL DX & React Environment"
+  description: "Entorno Full Stack con Java, React, HCL DXClient y extensiones pre-cargadas."
+  icon: "https://upload.wikimedia.org/wikipedia/commons/a/a7/React-icon.svg" # Un icono bonito para el dashboard
+
+# -------------------------------------------------------------------------
+# 1. COMPONENTES: Tu imagen Docker personalizada
+# -------------------------------------------------------------------------
+components:
+  - name: tools
+    container:
+      # LA IMAGEN QUE SUBIMOS A TU PROYECTO 'EUROPESIP-IMAGES'
+      # Ajusta el dominio si cambia, pero este es el que obtuvimos antes.
+      image: default-route-openshift-image-registry.apps.promox.europesip-lab.com/europesip-images/europesip-udi-dx:latest
+      
+      memoryLimit: 6Gi   # Java + Node consumen bastante, mejor ir sobrados
+      mountSources: true # Monta el código fuente en /projects
+      
+      # Variables de entorno clave
+      env:
+        - name: JAVA_HOME
+          value: /usr/lib/jvm/java-17-openjdk
+        - name: PATH
+          value: /usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:/home/tooling/.nvm/versions/node/v20.18.1/bin # Aseguramos Node en el PATH
+
+      # Puertos que OpenShift expondrá automáticamente si arrancas un server
+      endpoints:
+        - name: "react-app"
+          targetPort: 3000
+          exposure: public
+          protocol: http
+        - name: "vite-app"
+          targetPort: 5173
+          exposure: public
+          protocol: http
+        - name: "java-backend"
+          targetPort: 8080
+          exposure: public
+
+# -------------------------------------------------------------------------
+# 2. COMANDOS: Botones listos para usar en VS Code
+# -------------------------------------------------------------------------
+commands:
+  # --- COMANDO 1: Instalar Extensiones (Automático) ---
+  - id: install-local-extensions
+    exec:
+      label: "🔧 Instalar Extensiones Pre-cargadas"
+      component: tools
+      # Este script busca todos los .vsix en tu carpeta y los instala en el editor
+      commandLine: |
+        echo "--> Buscando extensiones en /opt/extensions..."
+        for vsix in /opt/extensions/*.vsix; do
+            if [ -f "$vsix" ]; then
+                echo "Installing: $(basename $vsix)"
+                # Intentamos usar 'code' (VS Code estándar) o 'che-code' según el entorno
+                if command -v code >/dev/null; then
+                    code --install-extension "$vsix" --force
+                else
+                    echo "⚠️ No se encontró el comando 'code'. Verifica el editor."
+                fi
+            fi
+        done
+        echo "✅ Extensiones instaladas. Es posible que debas recargar la ventana."
+
+  # --- COMANDO 2: Cargar tu Ejemplo (Manual) ---
+  - id: init-sample-project
+    exec:
+      label: "🚀 Inicializar Ejemplo HCL DX"
+      component: tools
+      workingDir: /projects
+      commandLine: |
+        SOURCE="/opt/samples/dx-create-script-app"
+        DEST="/projects/dx-create-script-app"
+
+        if [ -d "$DEST" ]; then
+            echo "⚠️  LA CARPETA YA EXISTE: $DEST"
+            echo "    No se ha copiado nada para no borrar tu trabajo."
+        else
+            echo "📂 Copiando ejemplo desde la imagen..."
+            cp -r "$SOURCE" "$DEST"
+            echo "✅ Proyecto creado en: $DEST"
+        fi
+
+  # --- COMANDO 3: Verificar Herramientas (Diagnóstico) ---
+  - id: check-versions
+    exec:
+      label: "🔍 Verificar Versiones (DX, Java, Node)"
+      component: tools
+      workingDir: /projects
+      commandLine: |
+        echo "--- JAVA ---"
+        java -version
+        echo -e "\n--- NODE ---"
+        node -v
+        echo -e "\n--- HCL DX CLIENT ---"
+        dxclient --version
+        echo -e "\n--- EXTENSIONES EN DISCO ---"
+        ls -lh /opt/extensions
+
+  # --- COMANDO 4: Arrancar React (Genérico) ---
+  - id: start-react
+    exec:
+      label: "▶️ Start React App"
+      component: tools
+      workingDir: ${PROJECT_SOURCE} # Usa la carpeta del proyecto actual
+      commandLine: "npm start"
+
+# -------------------------------------------------------------------------
+# 3. EVENTOS: Cosas que pasan solas al arrancar
+# -------------------------------------------------------------------------
+events:
+  postStart:
+    # Nada más arrancar el workspace, ejecuta la instalación de extensiones
+    - "install-local-extensions"
