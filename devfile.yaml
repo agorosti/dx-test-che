@@ -1,30 +1,29 @@
 schemaVersion: 2.2.0
+
 metadata:
   name: hcl-dx-workspace-pro
   displayName: "HCL DX & React Environment"
   description: "Full Stack Environment with Java, React, HCL DXClient, and HCL DX Extensions."
   icon: "https://upload.wikimedia.org/wikipedia/commons/a/a7/React-icon.svg"
 
-# -------------------------------------------------------------------------
-# 1. COMPONENTS
-# -------------------------------------------------------------------------
 components:
   - name: tools
     container:
-      # Public image shared on Quay (based on standar UDI)
       image: quay.io/agorostidi/europesip-udi-dx:latest
       memoryLimit: 6Gi
       mountSources: true
-      
-      # Avoid CrashLoop
+
+      # Keep container alive (avoids CrashLoop)
       command: ["/bin/sh", "-c", "tail -f /dev/null"]
 
+      # Environment variables for Java + Node
       env:
         - name: JAVA_HOME
           value: /usr/lib/jvm/java-17-openjdk
         - name: PATH
           value: /usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:/home/tooling/.nvm/versions/node/v20.18.1/bin
 
+      # Exposed ports for the workspace
       endpoints:
         - name: "react-app"
           targetPort: 3000
@@ -38,50 +37,59 @@ components:
           targetPort: 8080
           exposure: public
 
-# -------------------------------------------------------------------------
-# 2. COMMANDS
-# -------------------------------------------------------------------------
 commands:
-  # --- COMMAND 1: Install Only HCL DX Extension (From Local /opt) ---
+
+  ###########################################################################
+  # 1) Install LOCAL HCL DX Extension
+  #
+  # NOTE:
+  # This extension is NOT available in OpenVSX.
+  # Therefore, we install it manually from /opt/extensions/*.vsix
+  # using a local workaround.
+  ###########################################################################
   - id: install-local-dx-extension
     exec:
-      label: "🔧 Install Local HCL DX Extension"
+      label: "🔧 Install Local HCL DX Extension (Workaround)"
       component: tools
       commandLine: |
-        # Target directory for VS Code extensions
         EXT_DIR="$HOME/.vscode/extensions"
         mkdir -p "$EXT_DIR"
-        
-        echo "--> Scanning /opt/extensions for HCL DX..."
 
-        # Loop to find specifically the HCL DX extension
+        echo "--> Searching for HCL DX VSIX packages in /opt/extensions..."
+
         for vsix in /opt/extensions/*hcl-dx*.vsix; do
-            if [ -f "$vsix" ]; then
-                FILENAME=$(basename "$vsix" .vsix)
-                TARGET="$EXT_DIR/$FILENAME"
-                
-                if [ -d "$TARGET" ]; then
-                    echo "   ⚠️  $FILENAME appears to be already installed. Skipping."
-                else
-                    echo "   📦 Unpacking HCL DX Extension: $FILENAME..."
-                    # Unzip logic (robust method)
-                    unzip -q "$vsix" -d "$TARGET.tmp"
-                    if [ -d "$TARGET.tmp/extension" ]; then
-                        mv "$TARGET.tmp/extension" "$TARGET"
-                        rm -rf "$TARGET.tmp"
-                        echo "      ✅ Success: HCL DX installed."
-                    else
-                        echo "      ❌ Error: Invalid VSIX structure."
-                    fi
-                fi
-            fi
-        done
-        echo "🎉 Local installation check complete. RELOAD WINDOW (F1 > Reload Window) to apply."
+          if [ -f "$vsix" ]; then
+            FILENAME=$(basename "$vsix" .vsix)
+            TARGET="$EXT_DIR/$FILENAME"
 
-  # --- COMMAND 2: Load Sample Project ---
+            # CACHE CHECK: Skip if already installed
+            if [ -d "$TARGET" ]; then
+                echo "⚠️  Local HCL DX extension '$FILENAME' already installed. Skipping."
+                continue
+            fi
+
+            echo "📦 Installing local HCL DX extension: $FILENAME"
+            unzip -q "$vsix" -d "$TARGET.tmp"
+
+            if [ -d "$TARGET.tmp/extension" ]; then
+                mv "$TARGET.tmp/extension" "$TARGET"
+                rm -rf "$TARGET.tmp"
+                echo "   ✔️ Installed: $FILENAME"
+            else
+                echo "   ❌ Invalid VSIX format for $FILENAME"
+            fi
+          fi
+        done
+
+        echo "🎉 Local HCL DX extension installation completed."
+
+
+  ###########################################################################
+  # 2) Initialize SAMPLE PROJECT
+  ###########################################################################
   - id: init-sample-project
     exec:
-      label: "🚀 Initialize HCL DX Sample"
+      label: "🚀 Initialize HCL DX Sample Project"
       component: tools
       workingDir: /projects
       commandLine: |
@@ -89,14 +97,17 @@ commands:
         DEST="/projects/dx-create-script-app"
 
         if [ -d "$DEST" ]; then
-            echo "⚠️  FOLDER ALREADY EXISTS: $DEST"
+            echo "⚠️  Project already exists: $DEST"
         else
-            echo "📂 Copying sample project from image..."
+            echo "📂 Copying sample project..."
             cp -r "$SOURCE" "$DEST"
-            echo "✅ Project successfully created at: $DEST"
+            echo "   ✔️ Project created at: $DEST"
         fi
 
-  # --- COMMAND 3: Diagnostic Check ---
+
+  ###########################################################################
+  # 3) Diagnostic tool versions
+  ###########################################################################
   - id: check-versions
     exec:
       label: "🔍 Check Tool Versions"
@@ -105,12 +116,15 @@ commands:
       commandLine: |
         echo "--- JAVA VERSION ---"
         java -version
-        echo -e "\n--- NODE VERSION ---"
+        echo "--- NODE VERSION ---"
         node -v
-        echo -e "\n--- HCL DX CLIENT ---"
+        echo "--- HCL DX CLIENT ---"
         dxclient --version
 
-  # --- COMMAND 4: Start React ---
+
+  ###########################################################################
+  # 4) Start React
+  ###########################################################################
   - id: start-react
     exec:
       label: "▶️ Start React App"
@@ -118,10 +132,119 @@ commands:
       workingDir: ${PROJECT_SOURCE}
       commandLine: "npm start"
 
-# -------------------------------------------------------------------------
-# 3. EVENTS
-# -------------------------------------------------------------------------
+
+  ###########################################################################
+  # 5) Install ALL VSCode Extensions from OpenVSX (Parallel + Cached)
+  #
+  # NOTE:
+  # All extensions below come directly from OpenVSX.org
+  # including HCL AppScan CodeSweep.
+  #
+  # We also support:
+  # - Parallel downloads (each extension installs in background)
+  # - Cache detection (skips if installed)
+  ###########################################################################
+  - id: install-openvsx-extensions
+    exec:
+      label: "🔌 Install VSCode Extensions (OpenVSX, Parallel + Cache)"
+      component: tools
+      commandLine: |
+        EXT_DIR="$HOME/.vscode/extensions"
+        mkdir -p "$EXT_DIR"
+
+        # Parallel installer function
+        install_vsix () {
+          NAME="$1"
+          URL="$2"
+          TARGET="$EXT_DIR/$NAME"
+
+          # Skip if already installed
+          if [ -d "$TARGET" ]; then
+            echo "⚠️  $NAME already installed. Skipping."
+            return
+          fi
+
+          echo "📦 Installing $NAME from OpenVSX..."
+          (
+            wget -q "$URL" -O /tmp/ext.vsix
+            unzip -q /tmp/ext.vsix -d "$TARGET.tmp"
+
+            if [ -d "$TARGET.tmp/extension" ]; then
+              mv "$TARGET.tmp/extension" "$TARGET"
+              rm -rf "$TARGET.tmp"
+              echo "   ✔️ Installed: $NAME"
+            else
+              echo "   ❌ Invalid VSIX for: $NAME"
+              rm -rf "$TARGET.tmp"
+            fi
+          ) &
+        }
+
+        echo "🔽 Downloading all VSCode extensions from OpenVSX..."
+
+        # Java
+        install_vsix "redhat.java" \
+          "https://open-vsx.org/api/redhat/java/latest/file/redhat.java.vsix"
+
+        # Java Debug
+        install_vsix "vscjava.vscode-java-debug" \
+          "https://open-vsx.org/api/vscjava/vscode-java-debug/latest/file/vscjava.vscode-java-debug.vsix"
+
+        # Maven
+        install_vsix "vscjava.vscode-maven" \
+          "https://open-vsx.org/api/vscjava/vscode-maven/latest/file/vscjava.vscode-maven.vsix"
+
+        # React Snippets
+        install_vsix "dsznajder.es7-react-js-snippets" \
+          "https://open-vsx.org/api/dsznajder/es7-react-js-snippets/latest/file/dsznajder.es7-react-js-snippets.vsix"
+
+        # Angular
+        install_vsix "Angular.ng-template" \
+          "https://open-vsx.org/api/Angular/ng-template/latest/file/Angular.ng-template.vsix"
+
+        # Prettier
+        install_vsix "esbenp.prettier-vscode" \
+          "https://open-vsx.org/api/esbenp/prettier-vscode/latest/file/esbenp.prettier-vscode.vsix"
+
+        # ESLint
+        install_vsix "dbaeumer.vscode-eslint" \
+          "https://open-vsx.org/api/dbaeumer/vscode-eslint/latest/file/dbaeumer.vscode-eslint.vsix"
+
+        # GitLens
+        install_vsix "eamodio.gitlens" \
+          "https://open-vsx.org/api/eamodio/gitlens/latest/file/eamodio.gitlens.vsix"
+
+        # YAML
+        install_vsix "redhat.vscode-yaml" \
+          "https://open-vsx.org/api/redhat/vscode-yaml/latest/file/redhat.vscode-yaml.vsix"
+
+        # Docker
+        install_vsix "ms-azuretools.vscode-docker" \
+          "https://open-vsx.org/api/ms-azuretools/vscode-docker/latest/file/ms-azuretools.vscode-docker.vsix"
+
+        # EditorConfig
+        install_vsix "EditorConfig.EditorConfig" \
+          "https://open-vsx.org/api/EditorConfig/EditorConfig/latest/file/EditorConfig.EditorConfig.vsix"
+
+        # Markdown All-in-One
+        install_vsix "yzhang.markdown-all-in-one" \
+          "https://open-vsx.org/api/yzhang/markdown-all-in-one/latest/file/yzhang.markdown-all-in-one.vsix"
+
+        # HCL AppScan CodeSweep (available in OpenVSX)
+        install_vsix "HCLTechnologies.hclappscancodesweep" \
+          "https://open-vsx.org/api/HCLTechnologies/hclappscancodesweep/latest/file/HCLTechnologies.hclappscancodesweep.vsix"
+
+        # Wait for all background jobs
+        wait
+
+        echo "🎉 All OpenVSX extensions installed."
+
+
+###############################################################################
+# EVENTS: Launch local HCL DX extension first, then OpenVSX extensions
+###############################################################################
 events:
   postStart:
-    # Run the local installer automatically on startup
-    - "install-local-dx-extension"
+    - install-local-dx-extension     # Local workaround → HCL DX Extension not in OpenVSX
+    - install-openvsx-extensions     # All other extensions installed from OpenVSX
+
