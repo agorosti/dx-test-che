@@ -246,5 +246,5 @@ commands:
 events:
   postStart:
     - install-local-dx-extension     # Local workaround → HCL DX Extension not in OpenVSX
+  postStartAsync:
     - install-openvsx-extensions     # All other extensions installed from OpenVSX
-
