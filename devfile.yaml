@@ -2,35 +2,30 @@ schemaVersion: 2.2.0
 metadata:
   name: hcl-dx-workspace-pro
   displayName: "HCL DX & React Environment"
-  description: "Entorno Full Stack con Java, React, HCL DXClient y extensiones pre-cargadas."
-  icon: "https://upload.wikimedia.org/wikipedia/commons/a/a7/React-icon.svg" # Un icono bonito para el dashboard
+  description: "Full Stack Environment with Java, React, HCL DXClient, and HCL DX Extensions."
+  icon: "https://upload.wikimedia.org/wikipedia/commons/a/a7/React-icon.svg"
 
 # -------------------------------------------------------------------------
-# 1. COMPONENTES: Tu imagen Docker personalizada
+# 1. COMPONENTS
 # -------------------------------------------------------------------------
 components:
+  # --- A. Main Container (Your Custom Image) ---
   - name: tools
     container:
-      # LA IMAGEN QUE SUBIMOS A TU PROYECTO 'EUROPESIP-IMAGES'
-      # Ajusta el dominio si cambia, pero este es el que obtuvimos antes.
+      # Using your public Quay.io image
       image: quay.io/agorostidi/europesip-udi-dx:latest
+      memoryLimit: 6Gi
+      mountSources: true
       
-      memoryLimit: 6Gi   # Java + Node consumen bastante, mejor ir sobrados
-      mountSources: true # Monta el código fuente en /projects
-
-      # --- AÑADE ESTO PARA EVITAR EL CRASH ---
-      # Esto fuerza al contenedor a no hacer nada, solo existir.
+      # Keep the container running (prevent CrashLoopBackOff)
       command: ["/bin/sh", "-c", "tail -f /dev/null"]
-      # -------
-      
-      # Variables de entorno clave
+
       env:
         - name: JAVA_HOME
           value: /usr/lib/jvm/java-17-openjdk
         - name: PATH
-          value: /usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:/home/tooling/.nvm/versions/node/v20.18.1/bin # Aseguramos Node en el PATH
+          value: /usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:/home/tooling/.nvm/versions/node/v20.18.1/bin
 
-      # Puertos que OpenShift expondrá automáticamente si arrancas un server
       endpoints:
         - name: "react-app"
           targetPort: 3000
@@ -44,35 +39,71 @@ components:
           targetPort: 8080
           exposure: public
 
+  # --- B. Standard Extensions (From Open VSX Registry) ---
+  # These will be downloaded automatically by OpenShift
+  - name: java-pack
+    chePlugin:
+      id: vscjava/vscode-java-pack/latest
+  - name: react-snippets
+    chePlugin:
+      id: dsznajder/es7-react-js-snippets/latest
+  - name: angular-ls
+    chePlugin:
+      id: angular/ng-template/latest
+  - name: hcl-codesweep
+    chePlugin:
+      id: hcltechnologies/hclappscancodesweep/latest
+
 # -------------------------------------------------------------------------
-# 2. COMANDOS: Botones listos para usar en VS Code
+# 2. COMMANDS
 # -------------------------------------------------------------------------
 commands:
-  # --- COMANDO 1: Instalar Extensiones (Automático) ---
-  - id: install-local-extensions
+  # --- COMMAND 1: Install Only HCL DX Extension (From Local /opt) ---
+  - id: install-local-dx-extension
     exec:
-      label: "🔧 Instalar Extensiones Pre-cargadas"
+      label: "🔧 Install Local HCL DX Extension"
       component: tools
-      # Este script busca todos los .vsix en tu carpeta y los instala en el editor
       commandLine: |
-        echo "--> Buscando extensiones en /opt/extensions..."
-        for vsix in /opt/extensions/*.vsix; do
+        # Target directory for VS Code extensions
+        EXT_DIR="$HOME/.vscode/extensions"
+        mkdir -p "$EXT_DIR"
+        
+        echo "--> Scanning /opt/extensions for HCL DX..."
+
+        # Loop to find specifically the HCL DX extension
+        for vsix in /opt/extensions/*hcl-dx*.vsix; do
             if [ -f "$vsix" ]; then
-                echo "Installing: $(basename $vsix)"
-                # Intentamos usar 'code' (VS Code estándar) o 'che-code' según el entorno
-                if command -v code >/dev/null; then
-                    code --install-extension "$vsix" --force
+                # Create a unique folder name based on the file
+                FILENAME=$(basename "$vsix" .vsix)
+                TARGET="$EXT_DIR/$FILENAME"
+                
+                if [ -d "$TARGET" ]; then
+                    echo "   ⚠️  $FILENAME appears to be already installed. Skipping."
                 else
-                    echo "⚠️ No se encontró el comando 'code'. Verifica el editor."
+                    echo "   📦 Unpacking HCL DX Extension: $FILENAME..."
+                    
+                    # Unzip logic (robust method that doesn't rely on 'code' binary)
+                    unzip -q "$vsix" -d "$TARGET.tmp"
+                    
+                    # Move the actual content from 'extension' folder to target
+                    if [ -d "$TARGET.tmp/extension" ]; then
+                        mv "$TARGET.tmp/extension" "$TARGET"
+                        rm -rf "$TARGET.tmp"
+                        echo "      ✅ Success: HCL DX installed."
+                    else
+                        echo "      ❌ Error: Invalid VSIX structure."
+                    fi
                 fi
+            else
+                echo "⚠️  No HCL DX extension found in /opt/extensions."
             fi
         done
-        echo "✅ Extensiones instaladas. Es posible que debas recargar la ventana."
+        echo "🎉 Local installation check complete. If new extensions were added, please RELOAD WINDOW (F1 > Reload Window)."
 
-  # --- COMANDO 2: Cargar tu Ejemplo (Manual) ---
+  # --- COMMAND 2: Load Sample Project ---
   - id: init-sample-project
     exec:
-      label: "🚀 Inicializar Ejemplo HCL DX"
+      label: "🚀 Initialize HCL DX Sample"
       component: tools
       workingDir: /projects
       commandLine: |
@@ -80,42 +111,42 @@ commands:
         DEST="/projects/dx-create-script-app"
 
         if [ -d "$DEST" ]; then
-            echo "⚠️  LA CARPETA YA EXISTE: $DEST"
-            echo "    No se ha copiado nada para no borrar tu trabajo."
+            echo "⚠️  FOLDER ALREADY EXISTS: $DEST"
+            echo "    Action aborted to prevent overwriting your work."
         else
-            echo "📂 Copiando ejemplo desde la imagen..."
+            echo "📂 Copying sample project from image..."
             cp -r "$SOURCE" "$DEST"
-            echo "✅ Proyecto creado en: $DEST"
+            echo "✅ Project successfully created at: $DEST"
         fi
 
-  # --- COMANDO 3: Verificar Herramientas (Diagnóstico) ---
+  # --- COMMAND 3: Diagnostic Check ---
   - id: check-versions
     exec:
-      label: "🔍 Verificar Versiones (DX, Java, Node)"
+      label: "🔍 Check Tool Versions"
       component: tools
       workingDir: /projects
       commandLine: |
-        echo "--- JAVA ---"
+        echo "--- JAVA VERSION ---"
         java -version
-        echo -e "\n--- NODE ---"
+        echo -e "\n--- NODE VERSION ---"
         node -v
         echo -e "\n--- HCL DX CLIENT ---"
         dxclient --version
-        echo -e "\n--- EXTENSIONES EN DISCO ---"
+        echo -e "\n--- LOCAL EXTENSIONS DIR ---"
         ls -lh /opt/extensions
 
-  # --- COMANDO 4: Arrancar React (Genérico) ---
+  # --- COMMAND 4: Start React ---
   - id: start-react
     exec:
       label: "▶️ Start React App"
       component: tools
-      workingDir: ${PROJECT_SOURCE} # Usa la carpeta del proyecto actual
+      workingDir: ${PROJECT_SOURCE}
       commandLine: "npm start"
 
 # -------------------------------------------------------------------------
-# 3. EVENTOS: Cosas que pasan solas al arrancar
+# 3. EVENTS
 # -------------------------------------------------------------------------
 events:
   postStart:
-    # Nada más arrancar el workspace, ejecuta la instalación de extensiones
-    - "install-local-extensions"
+    # Run the local installer automatically on startup
+    - "install-local-dx-extension"
