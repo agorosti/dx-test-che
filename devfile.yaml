@@ -13,7 +13,7 @@ components:
     container:
       # LA IMAGEN QUE SUBIMOS A TU PROYECTO 'EUROPESIP-IMAGES'
       # Ajusta el dominio si cambia, pero este es el que obtuvimos antes.
-      image: default-route-openshift-image-registry.apps.promox.europesip-lab.com/europesip-images/europesip-udi-dx:latest
+      image: quay.io/agorostidi/europesip-udi-dx:latest
       
       memoryLimit: 6Gi   # Java + Node consumen bastante, mejor ir sobrados
       mountSources: true # Monta el código fuente en /projects
