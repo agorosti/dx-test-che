@@ -17,6 +17,11 @@ components:
       
       memoryLimit: 6Gi   # Java + Node consumen bastante, mejor ir sobrados
       mountSources: true # Monta el código fuente en /projects
+
+      # --- AÑADE ESTO PARA EVITAR EL CRASH ---
+      # Esto fuerza al contenedor a no hacer nada, solo existir.
+      command: ["/bin/sh", "-c", "tail -f /dev/null"]
+      # -------
       
       # Variables de entorno clave
       env:
